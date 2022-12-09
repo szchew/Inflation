@@ -6,7 +6,7 @@ frames reset
 ***Import necessary series from FRED except NFCI_all
 ***Generate monthly time series dates using tsset
 ***Fill in missing months data using tsfill
-import fred FEDFUNDS PCEPILFE DPCCRV1Q225SBEA DPCCRG3A086NBEA GDPPOT GDPC1 BBKMGDP
+import fred CPIAUCSL UNRATE FEDFUNDS PCEPILFE DPCCRV1Q225SBEA DPCCRG3A086NBEA GDPPOT GDPC1 BBKMGDP
 gen monthly_date = mofd(daten)
 tsset monthly_date, monthly
 tsfill
@@ -82,7 +82,7 @@ label variable id "Row Number"
 
 
 *** Detect Surging Inflation(Binary)
-drop surging_inflation
+
 gen surging_inflation = 0 if id >=361 & id <= 1116
 egen sd_monthly_pce_inflate = sd(monthly_pce_inflate)
 replace surging_inflation = 1 if annual_pce_inflate>2 & monthly_pce_inflate> 2*sd_monthly_pce_inflate & id >=361 & id <= 1116
