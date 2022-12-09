@@ -82,7 +82,6 @@ label variable id "Row Number"
 
 
 *** Detect Surging Inflation(Binary)
-
 gen surging_inflation = 0 if id >=361 & id <= 1116
 egen sd_monthly_pce_inflate = sd(monthly_pce_inflate)
 replace surging_inflation = 1 if annual_pce_inflate>2 & monthly_pce_inflate> 2*sd_monthly_pce_inflate & id >=361 & id <= 1116
