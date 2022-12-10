@@ -86,17 +86,32 @@ label variable hp_output_gap "Hodrick-Prescott Filter Output Gap"
 label variable id "Row Number"
 
 *** Detect Surging Inflation(Binary)
-gen surgeInflation = 0 if id >=361 & id <= 1116
-label variable surgeInflation "Inflation Surge"
-egen sd_monthly_pce_inflate = sd(monthly_pce_inflate)
-replace surgeInflation = 1 if annual_pce_inflate>2 & monthly_pce_inflate> 5 & id >=361 & id <= 1116
-tsspell surgeInflation if surgeInflation==1
-egen consec = max(_seq), by(_spell)
-replace surgeInflation = 0 if consec<=3
-drop sd_monthly_pce_inflate _spell _seq _end consec
+gen aboveXpercent = 0 if id >=361 & id <= 1116
+label variable aboveXpercent "Inflation Surge"
+replace aboveXpercent = 1 if annual_pce_inflate>5 & id >=361 & id <= 1116
+tsspell aboveXpercent if aboveXpercent==1
+egen max = max(annual_pce_inflate) if annual_pce_inflate !=., by(_spell) 
+gen surgeInflation=.
+replace surgeInflation=1 if aboveXpercent==1 & annual_pce_inflate==max
+replace surgeInflation=0 if surgeInflation!=1&id >=361 & id <= 1116
+drop _spell _seq _end max
+tsspell surgeInflation if surgeInflation==0
+bysort _spell: egen trough_min = min(annual_pce_inflate) if id >=361 & id <= 1116
+replace surgeInflation = 1 if annual_pce_inflate==trough_min & _spell >=1
+drop _spell _seq _end trough_min
+tsspell surgeInflation if surgeInflation== 1
+sort monthly_date
+gen tf=0
+forvalues i=362/1116{
+	replace tf=1 if surgeInflation[`i'-1]==1 & surgeInflation[`i']==0 & mod(_spell[`i'-1],2)==1
+	replace tf=0 if surgeInflation[`i'-1]==1 & surgeInflation[`i']==1 & mod(_spell[`i'-1],2)==0
+	replace surgeInflation=1 in `i' if tf==1
+}
+drop _spell _seq _end tf
 
 bgshade monthly_date, shaders(surgeInflation) legend ///
-	twoway(line annual_pce_inflate monthly_date if annual_pce_inflate!=., yaxis(1) || line FEDFUNDS monthly_date if annual_pce_inflate!=. , yaxis(2) ///
+	twoway(line annual_pce_inflate monthly_date if FEDFUNDS !=., yaxis(1) || line FEDFUNDS monthly_date if FEDFUNDS !=. ///
+	 , yaxis(2) ///
 	title("USA") legend(pos(1) ring(0) cols(1) symxsize(5) size(2) region(col(none)) stack symplacement(center)) ///
 	ytitle("Annual PCE Inflation Rate"))
 
