@@ -1,4 +1,6 @@
 set fredkey 2cf4ed60332254125e3f4abcd8e59920, permanently
+//ssc install bgshade
+//ssc install tsspell
 **** Clear everything and reset frames 
 clear
 frames reset
@@ -70,19 +72,41 @@ replace trend_hp_GDPC1 = trend_hp_GDPC1[_n-1] if missing(trend_hp_GDPC1) & id <=
 gen hp_output_gap = ((GDPC1 - trend_hp_GDPC1)/trend_hp_GDPC1)*100
 drop hp_gdp
 
+
+
+
 *** Label the variables
 label variable monthly_date "Year, Month"
 label variable output_gap "Output Gap - Difference between Potential and Actual GDP"
-label variable annual_pce_inflate "Annual Growth Rate(PCE Inflation)"
-label variable quarterly_pce_inflate "Quarterly Growth Rate(PCE Inflation)"
-label variable monthly_pce_inflate "Monthly Growth Rate(PCE Inflation)"
+label variable annual_pce_inflate "Annual PCE Inflation Rate"
+label variable quarterly_pce_inflate "Quarterly PCE Inflation Rate"
+label variable monthly_pce_inflate "Monthly PCE Inflation Rate"
 label variable trend_hp_GDPC1 "Hodrick-Prescott Filter Trend GDP"
 label variable hp_output_gap "Hodrick-Prescott Filter Output Gap"
 label variable id "Row Number"
 
-
 *** Detect Surging Inflation(Binary)
-gen surging_inflation = 0 if id >=361 & id <= 1116
+gen surgeInflation = 0 if id >=361 & id <= 1116
+label variable surgeInflation "Inflation Surge"
 egen sd_monthly_pce_inflate = sd(monthly_pce_inflate)
-replace surging_inflation = 1 if annual_pce_inflate>2 & monthly_pce_inflate> 2*sd_monthly_pce_inflate & id >=361 & id <= 1116
-drop sd_monthly_pce_inflate
+replace surgeInflation = 1 if annual_pce_inflate>2 & monthly_pce_inflate> 5 & id >=361 & id <= 1116
+tsspell surgeInflation if surgeInflation==1
+egen consec = max(_seq), by(_spell)
+replace surgeInflation = 0 if consec<=3
+drop sd_monthly_pce_inflate _spell _seq _end consec
+
+bgshade monthly_date, shaders(surgeInflation) legend ///
+	twoway(line annual_pce_inflate monthly_date if annual_pce_inflate!=., yaxis(1) || line FEDFUNDS monthly_date if annual_pce_inflate!=. , yaxis(2) ///
+	title("USA") legend(pos(1) ring(0) cols(1) symxsize(5) size(2) region(col(none)) stack symplacement(center)) ///
+	ytitle("Annual PCE Inflation Rate"))
+
+
+*** Detect Stability
+gen stableInflation = 0
+replace stableInflation = 1 if annual_pce_inflate>=0 & annual_pce_inflate<=2
+
+*** Detect Deflation
+drop deflation
+gen deflation = 0 if id >=361 & id <= 1116
+label variable deflation "Deflation"
+replace deflation = 1 if annual_pce_inflate <= 2 & D.annual_pce_inflate <=0
