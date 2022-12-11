@@ -1,6 +1,8 @@
 set fredkey 2cf4ed60332254125e3f4abcd8e59920, permanently
 //ssc install bgshade
 //ssc install tsspell
+
+
 **** Clear everything and reset frames 
 clear
 frames reset
@@ -85,21 +87,62 @@ label variable trend_hp_GDPC1 "Hodrick-Prescott Filter Trend GDP"
 label variable hp_output_gap "Hodrick-Prescott Filter Output Gap"
 label variable id "Row Number"
 
+
 *** Detect Surging Inflation(Binary)
-gen aboveXpercent = 0 if id >=361 & id <= 1116
-label variable aboveXpercent "Inflation Surge"
-replace aboveXpercent = 1 if annual_pce_inflate>5 & id >=361 & id <= 1116
-tsspell aboveXpercent if aboveXpercent==1
+
+//Generate First Differnece(t - (t-1)) & First Forward Difference ((t+1) - t) for Annual PCE Inflation and carry forward the two differences forward to their respective years
+//We first generate 2 columns named annual_pce_inflate_1st_diff and annual_pce_inflate_1st_f_diff which contains the first difference and first forward difference respectively
+//Next, we would label the 2 columns
+//Lastly, we would generate the required values usinf PCE inflation and carry them forward
+gen annual_pce_inflate_1st_f_diff=.
+gen annual_pce_inflate_1st_diff=.
+
+label variable annual_pce_inflate_1st_diff "First Difference of Annual PCE Inflation"
+label variable annual_pce_inflate_1st_f_diff "First Forward Difference of Annual PCE Inflation"
+
+replace annual_pce_inflate_1st_f_diff = f.annual_pce_inflate - annual_pce_inflate if f.annual_pce_inflate - annual_pce_inflate != 0
+forvalues i=1/11{
+	replace annual_pce_inflate_1st_f_diff = annual_pce_inflate_1st_f_diff[id+1] if missing(annual_pce_inflate_1st_f_diff) & id<=1116
+}
+replace annual_pce_inflate_1st_diff = d.annual_pce_inflate if id >=361 & id <= 1116 
+replace annual_pce_inflate_1st_diff=. if annual_pce_inflate_1st_diff==0
+replace annual_pce_inflate_1st_diff = annual_pce_inflate_1st_diff[id-1] if missing(annual_pce_inflate_1st_diff) & id<=1116 & id>=361
+
+
+//Next, we would detect all Annual PCE inflation that are above 5 percent(Identified using 3 conditions)
+//1)First Forward Difference of PCE Inflation <=0 & First Difference of PCE Inflation >= 0 
+//2)Time period is valid 
+// Following which, we would store the Peaks as a binary variable called aboveXpercentS 
+gen aboveXpercentS = 0 if id >=361 & id <= 1116
+label variable aboveXpercentS "Above X percent & First Forward Diff >= 0 & First Diff <= 0"
+replace aboveXpercentS = 1 if annual_pce_inflate>5 & id >=361 & id <= 1116 & annual_pce_inflate_1st_diff>=0 & annual_pce_inflate_1st_f_diff<=0
+
+//Ensure that for each group of constant high inflation, we can identify the max
+tsspell aboveXpercentS if aboveXpercentS==1 
 egen max = max(annual_pce_inflate) if annual_pce_inflate !=., by(_spell) 
 gen surgeInflation=.
-replace surgeInflation=1 if aboveXpercent==1 & annual_pce_inflate==max
-replace surgeInflation=0 if surgeInflation!=1&id >=361 & id <= 1116
+label variable surgeInflation "Inflation Surge"
+replace surgeInflation=1 if aboveXpercentS==1 & annual_pce_inflate==max
 drop _spell _seq _end max
-tsspell surgeInflation if surgeInflation==0
-bysort _spell: egen trough_min = min(annual_pce_inflate) if id >=361 & id <= 1116
-replace surgeInflation = 1 if annual_pce_inflate==trough_min & _spell >=1
-drop _spell _seq _end trough_min
+
+//We would now find the trough for every peak in surgeInflation by finding the minimum Annual PCE Inflation that is  >= 2%
+// & First Forward Difference in PCE Inflation >= 0(Ensure consistent increase in inflation to better detect troughs) -- Store these value in trough_min
+// (We then create trough_min2 to carry forward the minimum identified above to each group that they are in, followed by dropping the unnecessary trough_min2)
+replace surgeInflation=0 if surgeInflation!=1 & id >=361 & id <= 1116
+tsspell surgeInflation if surgeInflation==0 
+bysort _spell (monthly_date): egen trough_min = min(annual_pce_inflate) if id >=361 & id <= 1116 & annual_pce_inflate >=2 & annual_pce_inflate_1st_f_diff>=0
+bysort _spell: egen trough_min2 = max(trough_min)
+replace trough_min = trough_min2
+drop trough_min2
+
+//We then match each peak with their respective trough 
+// P.S. I create max_spell in order to identify the last consecutive period where trough might exist so that I can eliminate this particular peiod when matching the peaks and the troughs
+
+egen max_spell = max(_spell)
+replace surgeInflation = 1 if annual_pce_inflate==trough_min & _spell >=1 & _spell < max_spell
+drop _spell _seq _end trough_min max_spell
 tsspell surgeInflation if surgeInflation== 1
+   //Using tf and the for loop below, I 'closed' the gap between each peak and their respective trough (and drop redundant columns)
 sort monthly_date
 gen tf=0
 forvalues i=362/1116{
@@ -109,9 +152,9 @@ forvalues i=362/1116{
 }
 drop _spell _seq _end tf
 
+//Plot the Inflation Surge Graph!!!
 bgshade monthly_date, shaders(surgeInflation) legend ///
-	twoway(line annual_pce_inflate monthly_date if FEDFUNDS !=., yaxis(1) || line FEDFUNDS monthly_date if FEDFUNDS !=. ///
-	 , yaxis(2) ///
+	twoway(line annual_pce_inflate monthly_date if tin(1950m1, 2025m12) , yaxis(1) || line FEDFUNDS monthly_date if FEDFUNDS !=., yaxis(2) ///
 	title("USA") legend(pos(1) ring(0) cols(1) symxsize(5) size(2) region(col(none)) stack symplacement(center)) ///
 	ytitle("Annual PCE Inflation Rate"))
 
