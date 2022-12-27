@@ -6,42 +6,55 @@ library(tidyr)
 library(lubridate)
 library(zoo)
 library(ggplot2)
-
+Argentina, Australia, Austria, Belgium, Brazil, Bulgaria,
+Canada, Chile, China, Colombia, Croatia, Czech Republic, Denmark, Egypt, Estonia, Finland, France,
+Germany, Greece, Hong Kong, Hungary, India, Indonesia, Ireland, Israel, Italy, Japan, Korea, Latvia,
+Lithuania, Malaysia, Mexico, Netherlands, New Zealand, Nigeria, Norway, Peru, Philippines, Poland, Por-
+  tugal, Romania, Russia, Saudi Arabia, Singapore, Slovak Republic, Slovenia, Spain, South Africa, Sweden,
+Switzerland, Thailand, Turkey, Ukraine, the United Kingdom, and the United States
 
 fredr_set_key("2cf4ed60332254125e3f4abcd8e59920")
 #Import Fed Interest Rate and Transforming the data
-fedfunds<-fredr(series_id = "FEDFUNDS",frequency = 'a') %>%
+fedfunds<-fredr(series_id = "FEDFUNDS",frequency = 'm') %>%
   drop_na() %>%
   select(date,value) %>%
-  rename("annual_fed_interest_rate" = "value") %>%
-  select(date,annual_fed_interest_rate) %>%
-  mutate(date = year(date))
+  rename("monthly_fed_interest_rate" = "value") %>%
+  select(date,monthly_fed_interest_rate) 
 
 #Importing Inflation Information and Transforming it for use
-data <- wb_data(indicator="FP.CPI.TOTL.ZG",freq = "Y",lang = "en") %>%
-  rename("inflation" = FP.CPI.TOTL.ZG) %>%
-  select(country,date,inflation) %>%
+data <- read.csv("C:/Users/chews/Downloads/month.csv") %>%
   drop_na() %>%
-  left_join(fedfunds,by = c("date"="date"))
+  group_by(Country.Name) %>%
+  mutate(inflation = ((cpi_month-lag(cpi_month,n=12))/lag(cpi_month,n=12)) * 100) %>%
+  select(Country.Name,Time.Period,cpi_month,inflation) %>%
+  rename(date = Time.Period,country = Country.Name) %>%
+  mutate(date = ym(date)) %>%
+  left_join(fedfunds,by = c("date"="date")) %>%
+  drop_na() %>%
+  group_by(country) %>%
+  mutate(inflation_rate_change = inflation - lag(inflation,n=12))
+
+#Getting the 90th percentile of the Othenello's inflation
+nith <- quantile(data$inflation_rate_change,na.rm = T,probs = 0.9)
 
 #Create a separate dataframe to obtain Unique countries 
 #to use in a for loop later
 uniqueCountries <- unique(data$country)
 
+cty <- "United States"
 #Generate the different graphs required
 #Both Othenello's Absolute/Realtive Criterion
 for(cty in uniqueCountries) {
-  #Transforming current country's data for use later
+  #Transforming current country's data for use later 
   currCountryData <- data %>%
     filter(country == cty) %>%
-    mutate(inflation_rate_change = inflation - lag(inflation,n=1)) %>%
-    mutate(absolute = ifelse(inflation_rate_change>2.1,1,0)) %>%
+    mutate(absolute = ifelse(inflation_rate_change>nith,1,0)) %>%
     mutate(last_10_mean = rollmean(inflation_rate_change, k = 10, fill = NA, align = "right")) %>%
     mutate(last_10_sd = rollapply(inflation_rate_change,width=10,FUN=sd,fill = NA,align = "right")) %>%
     mutate(relative = ifelse(inflation_rate_change > last_10_mean + 1.65*last_10_sd,1,0)) %>%
     mutate(diffAbsolute = lag(absolute,n=1)) %>%
     mutate(diffRelative = lag(relative,n=1))
-  
+  q<-quantile(currCountryData$inflation_rate_change,probs=0.9,na.rm = TRUE)
   ##Finding out the start and end of inflation surge
   #based on Othenello's Absolute Criterion
   absoluteInflation.start <- currCountryData %>%
@@ -53,13 +66,15 @@ for(cty in uniqueCountries) {
     filter(diffAbsolute == 1) %>%
     select(date) %>%
     rename(absolute_inflation_end = "date")
+  
+  
   #Some absolute inflation start year may not have an ending year
   #Example Year 2021 is considered a surge, but due to its recency
   #The algorithm cannot detect its end year
   #This if condition accounts for this edge case(We set the 
   #end of the inflation surge period to be 2022 in this case)
   if (nrow(absoluteInflation.end) < nrow(absoluteInflation.start)) {
-    absoluteInflation.end[nrow(absoluteInflation.end) + 1,] = 2022
+    absoluteInflation.end[nrow(absoluteInflation.end) + 1,] = list(cty,as.Date("2022-11-01"))
   }
   #Combine the Start and End of the inflation surge into one
   # and drop the unnecessary frames
@@ -68,7 +83,7 @@ for(cty in uniqueCountries) {
   #Plot Othenello's Absolute Criterion Graph
   absoluteGraph<-ggplot(data = currCountryData, aes(x = date)) +
     geom_line(aes(y = inflation,color = "Inflation"),linetype="solid",linewidth = 0.8) +
-    geom_line(aes(y = annual_fed_interest_rate,color="FRED Annual Interest Rate"),linetype="solid",linewidth = 0.8) +
+    geom_line(aes(y = monthly_fed_interest_rate,color="FRED Annual Interest Rate"),linetype="solid",linewidth = 0.8) +
     annotate("rect", xmin = absoluteInflation$absolute_inflation_start, xmax = absoluteInflation$absolute_inflation_end, ymin = -Inf, ymax = +Inf,
              alpha = .4,fill = "pink") +
     scale_linetype_manual("",
@@ -128,7 +143,7 @@ for(cty in uniqueCountries) {
   #Plot Othenello's Relative Criterion Graph
   relativeGraph<-ggplot(data = currCountryData, aes(x = date)) +
     geom_line(aes(y = inflation,color = "Inflation"),linetype="solid",linewidth = 0.8) +
-    geom_line(aes(y = annual_fed_interest_rate,color="FRED Annual Interest Rate"),linetype="solid",linewidth = 0.8) +
+    geom_line(aes(y = monthly_fed_interest_rate,color="FRED Annual Interest Rate"),linetype="solid",linewidth = 0.8) +
     annotate("rect", xmin = relativeInflation$relative_inflation_start, xmax = relativeInflation$relative_inflation_end, ymin = -Inf, ymax = +Inf,
              alpha = .4,fill = "pink") +
     scale_linetype_manual("",
